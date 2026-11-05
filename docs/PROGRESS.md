@@ -1,3 +1,5 @@
+https://github.com/us3rop/secprog
+
 # Checkpoint 2 progress — 5 November 2026
 
 Implemented the file-manager checkpoint using the existing `sfm` package,
