@@ -92,7 +92,3 @@ are outside scope.
 - [Current design](docs/DESIGN.md): architecture and implemented mitigations.
 - [Progress note](docs/PROGRESS.md): checkpoint coverage, validation and limits.
 - `docs/checkpoint1/`: original design and diagram, retained as historical material.
-
-The supplied ZIP had no `.git` directory. The included history starts with an
-explicit import of that snapshot, followed by actual implementation commits.
-View it with `git log --oneline`; earlier upstream history is not reconstructed.
