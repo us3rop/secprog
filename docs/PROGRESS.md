@@ -43,8 +43,3 @@ Python cannot guarantee erasure of immutable password/key/plaintext copies.
 The CLI disables core dumps and clears the mutable master-key buffer when leaving
 a session. Running malware/root, rollback, secure deletion and compromised
 ancestor directories remain outside the implemented protection.
-
-The uploaded GitHub-style source ZIP contained no Git metadata. The first commit
-imports that snapshot explicitly; all subsequent commits record this implementation
-session. No prior working sessions or original upstream history were invented.
-The original checkpoint 1 documents remain unchanged under `docs/checkpoint1/`.
