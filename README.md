@@ -1,52 +1,98 @@
-# sfm: Secure File Manager
+# sfm — Secure File Manager
 
-ICS0022 Secure Programming, final project. A command-line file manager that stores files in a password-protected **encrypted vault** (AES-256-GCM, scrypt) on Linux, written in Python.
+ICS0022 Secure Programming, checkpoint 2. A local Linux CLI that encrypts files
+and their names in a password-protected vault. Python 3.11+, PyCryptodome,
+AES-256-GCM and scrypt. No network service or GUI.
 
-> Status: **Checkpoint 1** (design and threat model). Commands below are planned; the CLI skeleton exists but they are not implemented yet.
+## Install and run
 
-## Scope
-
-**In scope:** create a vault; import, list, export, rename and delete files inside it; confidentiality and integrity of file contents and names; safe handling of file paths, permissions and races; password and key management (change password, rotate key).
-
-**Out of scope:** network or multi-user sharing, GUI, Windows/macOS, protection against a root attacker or malware on a running, unlocked session, rollback of a whole vault to an older snapshot.
-
-See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture diagram, threat model and library choices.
-
-## Planned commands
-
-Global option: `--vault PATH` (default `~/.sfm-vault`). The password is always prompted, never passed as an argument.
-
-| Command | Purpose |
-|---------|---------|
-| `sfm init` | Create a new vault and set the password |
-| `sfm add SRC [--as NAME]` | Encrypt and import a file |
-| `sfm get NAME DEST [--force]` | Decrypt and export a file (refuses to overwrite by default) |
-| `sfm ls [PREFIX]` | List files in the vault |
-| `sfm info NAME` | Show size and timestamps |
-| `sfm mv OLD NEW` | Rename a file inside the vault |
-| `sfm rm NAME` | Delete a file from the vault |
-| `sfm verify` | Check integrity of header, index and all objects |
-| `sfm passwd` | Change the password (re-wraps the master key) |
-| `sfm rekey` | Rotate the master key and re-encrypt all files |
-
-## Build and run
-
-Requires Linux and Python 3.11+. Uses PyCryptodome.
+On a clean Linux machine, install Python 3.11+ with pip and venv support
+(on Debian/Ubuntu: `sudo apt install python3 python3-venv python3-pip`).
+Extract this repository, open a terminal in its root, then:
 
 ```bash
-git clone https://github.com/us3rop/secprog secure-file-manager && cd secure-file-manager
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-
-sfm --help          # or: python -m sfm --help
-pytest              # run tests
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[dev]'
+sfm --help
+python -m pytest -q
 ```
 
-## Layout
+`python -m sfm` is equivalent to `sfm`. A normal terminal is required for hidden
+password input; redirected input without a controlling terminal is rejected.
+Choose a master passphrase of 12–1024 characters. There is no password recovery.
 
-```
-src/sfm/     application code (cli.py now; pathguard, keys, crypto, index, storage planned)
-tests/       pytest tests
-docs/        DESIGN.md, architecture diagram
+```bash
+sfm --vault ./demo.vault init
+printf 'example contents\n' > sample.txt
+sfm --vault ./demo.vault add sample.txt --as notes.txt
+sfm --vault ./demo.vault ls
+sfm --vault ./demo.vault info notes.txt
+sfm --vault ./demo.vault get notes.txt restored.txt
+cmp sample.txt restored.txt
+sfm --vault ./demo.vault verify
 ```
 
+Every command except help/version prompts for the master password. Initialization
+and password changes ask for confirmation. Passwords are never arguments or
+printed; file contents are exported to a file, never displayed by the CLI.
+Imported source files remain on disk in their original form.
+
+## Commands
+
+Put `--vault PATH` **before** the command; the default is `~/.sfm-vault`.
+The vault's parent directory must already exist. `init` refuses an existing path.
+
+| Command | Behaviour |
+| --- | --- |
+| `init` | Create a private vault and set its password |
+| `add SRC [--as NAME]` | Import a regular file; reject duplicate names |
+| `get NAME DEST [--force]` | Export after authentication; refuse overwrite by default |
+| `ls [PREFIX]` | List matching logical names |
+| `info NAME` | Show byte size and UTC timestamps |
+| `mv OLD NEW` | Rename without replacing another entry |
+| `rm NAME` | Remove an entry |
+| `verify` | Authenticate the whole vault and validate every entry |
+| `passwd` | Change the password, keeping the master key |
+| `rekey` | Generate a new master key and re-encrypt the vault |
+
+Logical names are 1–255 printable characters without `/` or `\`; `.` and `..`
+are rejected. Quote paths containing spaces; use `--` before positional paths
+starting with `-`. Exit codes: 0 success, 1 operation failure, 2 argument error.
+
+## Storage and limits
+
+The vault directory is mode 0700; `vault.json` is mode 0600. Its public envelope
+contains the version, salt, fixed scrypt parameters, encrypted master key and
+ciphertexts. Names, contents, sizes and timestamps are encrypted together.
+Never manually edit these files. Back up the complete vault while no command is
+running; test the copy with `verify` before relying on it.
+
+Files are limited to 8 MiB; the serialized encrypted vault is limited to 32 MiB.
+The entire vault is authenticated and loaded in memory for each command. Each
+save rewrites it atomically; commands use an exclusive directory lock. This is
+the bounded checkpoint 2 format, not the planned chunked object store.
+
+Use trusted parent directories. Final path components are opened without following
+symlinks; special files and multiply linked source/vault files are rejected.
+Exports inside the vault are rejected. Exports are plaintext mode 0600 files;
+`--force` replaces an existing regular file. Deletion and password changes cannot
+erase old filesystem snapshots or backups.
+
+This educational implementation does not protect an unlocked process from
+malware/root, guarantee memory erasure, detect whole-vault rollback, or enforce
+a persistent password-attempt limit. Scrypt uses about 128 MiB per derivation;
+leave additional RAM available for the vault and Python process. Windows/macOS
+are outside scope.
+
+## Repository
+
+- `src/sfm/`: CLI, cryptography, storage and vault operations.
+- `tests/`: functional and security regression tests.
+- [Current design](docs/DESIGN.md): architecture and implemented mitigations.
+- [Progress note](docs/PROGRESS.md): checkpoint coverage, validation and limits.
+- `docs/checkpoint1/`: original design and diagram, retained as historical material.
+
+The supplied ZIP had no `.git` directory. The included history starts with an
+explicit import of that snapshot, followed by actual implementation commits.
+View it with `git log --oneline`; earlier upstream history is not reconstructed.

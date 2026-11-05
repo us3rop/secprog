@@ -12,3 +12,7 @@ index.enc
 *.key
 *.pem
 .env
+vault.json
+.sfm-*
+build/
+dist/

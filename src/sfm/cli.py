@@ -1,11 +1,15 @@
-"""Command-line interface (skeleton for Checkpoint 1).
-
-Rules for this layer (see docs/DESIGN.md): the password is read with getpass
-only, never from argv or the environment; errors are short and never leak
-secrets; every path is handed to the Path Guard, never used directly.
-"""
+"""Command dispatch and hidden password prompts; never display file contents."""
 import argparse
 import sys
+import getpass
+import resource
+import warnings
+from pathlib import Path
+
+from Crypto.Random import get_random_bytes
+from sfm import storage
+from sfm.crypto import VaultError, decode
+from sfm.vault import initialize, unlock, timestamp
 
 from sfm import __version__
 
@@ -39,9 +43,83 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def prompt(label="Master password: "):
+    # Refuse getpass's echoing fallback when no secure terminal is available.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        return getpass.getpass(label)
+
+
+def new_password():
+    password = prompt("New master password: ")
+    if not 12 <= len(password) <= 1024:
+        raise VaultError("master password must be 12–1024 characters")
+    if password != prompt("Confirm master password: "):
+        raise VaultError("passwords do not match")
+    return password
+
+
+def dispatch(args):
+    path = Path(args.vault).expanduser().absolute()
+    if args.command == "init":
+        initialize(path, new_password())
+        print("Vault created.")
+        return
+    with unlock(path, prompt()) as vault:
+        if args.command == "add":
+            vault.add(args.src, args.name)
+        elif args.command == "get":
+            entry = vault.require(args.name)
+            storage.export_file(args.dest, decode(entry["data"]), path, args.force)
+        elif args.command == "ls":
+            for name in sorted(vault.entries):
+                if name.startswith(args.prefix):
+                    print(name)
+            return
+        elif args.command == "info":
+            entry = vault.require(args.name)
+            for field in ("size", "created", "modified"):
+                print(f"{field}: {entry[field]}")
+            return
+        elif args.command == "mv":
+            from sfm.vault import validate_name
+            entry = vault.require(args.old)
+            validate_name(args.new)
+            if args.new in vault.entries:
+                raise VaultError("name already exists")
+            vault.entries[args.new] = entry
+            del vault.entries[args.old]
+            entry["modified"] = timestamp()
+            vault.save()
+        elif args.command == "rm":
+            vault.require(args.name)
+            del vault.entries[args.name]
+            vault.save()
+        elif args.command == "passwd":
+            vault.password = new_password()
+            vault.save()
+        elif args.command == "rekey":
+            vault.master[:] = get_random_bytes(32)
+            vault.save()
+        elif args.command == "verify":
+            print("Vault authenticated; all files verified.")
+            return
+    print("Done.")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    print(f"sfm {args.command}: not implemented yet (Checkpoint 2)", file=sys.stderr)
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        dispatch(args)
+        return EXIT_OK
+    except VaultError as error:
+        print(f"sfm: {error}", file=sys.stderr)
+    except (EOFError, KeyboardInterrupt, getpass.GetPassWarning):
+        print("sfm: secure password input unavailable or cancelled", file=sys.stderr)
+    except OSError:
+        # OS errors can contain attacker-controlled paths; keep output constant.
+        print("sfm: filesystem operation failed; check paths, permissions and available space", file=sys.stderr)
     return EXIT_ERROR
 
 
